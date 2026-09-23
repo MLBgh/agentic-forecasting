@@ -33,7 +33,7 @@ Project shape to keep in mind:
 - The core library `aieng.forecasting` owns stable infrastructure; reusable predictors live in `aieng.forecasting.methods`; use-case material lives in `implementations/<use-case>/`.
 - Strategy guides live under `guides/` (onboard a dataset, create an experiment, customize an agent, audit a result).
 - YAML specs are co-located under `implementations/<use-case>/specs/`.
-- Reference implementations: Getting Started, Food Price Forecasting, Energy/Oil (stateless capability track plus an adaptive learning agent), BoC Rate Decisions (quantitative path, cutoff-aware press-release ingestion, and a reasoning-alignment evaluator), and S&P 500 (in active development).
+- Reference implementations: Getting Started, Food Price Forecasting, Energy/Oil (stateless capability track plus an adaptive learning agent), BoC Rate Decisions (quantitative path, cutoff-aware press-release ingestion, and a reasoning-alignment evaluator), S&P 500 (in active development), and AC One (external-forecast adjustment with a composable toolbelt and a Python-enforced cap).
 - Energy/oil's older information-session notebooks are archived under `playground/energy_case_study/`.
 - Continuous and discrete-event forecasts are output modalities; numerical methods, LLM Processes, and agentic forecasters are method families that apply to either.
 

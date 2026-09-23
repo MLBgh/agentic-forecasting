@@ -13,6 +13,7 @@ The repo has two layers. A small core library (`aieng.forecasting`) owns cutoff-
 | 2 | [Food price forecasting](implementations/food_price_forecasting/) | Multivariate Canadian food CPI in the style of Canada's Food Price Report (nine sub-indices, 12-month trajectory, avg/avg YoY) | Naive last-value, AutoARIMA; report-grounded LLM-Process (quantile grid and sampled trajectory) |
 | 3 | [Energy / oil](implementations/energy_oil_forecasting/) | Daily WTI crude under regime-breaking news (continuous trajectory, binary up-shock, scenario analysis) | Prophet, LLM-Process, news-grounded agent, code-executing agent, adaptive (curriculum-trained) agent |
 | 4 | [BoC rate decisions](implementations/boc_rate_decisions/) | Will the Bank of Canada cut, hold, or hike at its next meeting? (ordered categorical; binary cut-vs-not special case) | Climatological frequency, multinomial logistic, categorical LLM-Process, analyst agent; LLM-as-judge reasoning alignment |
+| 5 | [AC One fuel consumption](implementations/ac_one/) | Monthly airline fuel consumption per anonymized station, 1–3 months ahead, adjusting an external XGBoost forecast (two paired scales, MAE / MAPE) | External-forecast baseline; cutoff-verified news-adjustment agent with a composable toolbelt and a Python-enforced adjustment cap |
 
 Also in this README: [Setup](#setup) · [Core concepts](#core-concepts) · [Repository layout](#repository-layout) · [Documentation](#documentation)
 
