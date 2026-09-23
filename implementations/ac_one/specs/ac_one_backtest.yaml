@@ -1,0 +1,21 @@
+# AC One full comparison manifest
+#
+# horizon_date is the target month in the anonymized export. Each forecast
+# origin is reconstructed as target month minus month_horizon.
+
+spec_id: ac_one_backtest_2026h1
+
+description: >-
+  Retrospective comparison of external XGBoost fuel-consumption forecasts and
+  cutoff-aware news-agent adjustments on both the minmax and indexed scales.
+  Each scale is scored only against its matching actual_* column. MAE and MAPE
+  are the primary comparison metrics.
+
+stations:
+  - STATION_A
+  - STATION_B
+
+horizons: [1, 2, 3]
+
+target_start: "2026-01-01"
+target_end: "2026-06-01"
