@@ -1,0 +1,170 @@
+# AC One Fuel Consumption Forecasting
+
+The **external-forecast adjustment** reference implementation. It forecasts
+monthly airline fuel-consumption volume per anonymized station at 1-, 2-, and
+3-month horizons.
+
+The pipeline begins after an existing XGBoost model has run. That model remains
+an external module: its point forecasts arrive in the supplied CSV on two
+scales, and a cutoff-aware news agent decides whether exceptional public
+information justifies a conservative adjustment. Each adjusted forecast is
+compared with the matching evaluation-only actual using MAE and MAPE.
+
+## Pipeline
+
+```text
+forecast_minmax  → baseline / news agent → MAE / MAPE vs actual_minmax
+forecast_indexed → baseline / news agent → MAE / MAPE vs actual_indexed
+```
+
+The agent is an overlay, not a replacement model. It does not recreate the
+XGBoost feature pipeline and does not receive actual consumption. Run both
+scales through the same agent so you can see which external-forecast input
+produces better results. MAE is scale-specific; use MAPE to compare scales.
+
+## Data contract
+
+[`VECTOR___AGENTIC_FORECASTING_DATA.csv`](VECTOR___AGENTIC_FORECASTING_DATA.csv)
+contains 36 rows: two anonymized stations, six target months, and three horizons.
+
+- `horizon_date` is the target month.
+- `month_horizon` is the lead in months.
+- forecast origin is derived as `horizon_date - month_horizon` months.
+- `forecast_minmax` / `actual_minmax` are one paired evaluation scale.
+- `forecast_indexed` / `actual_indexed` are the other paired evaluation scale.
+- There is no unsuffixed `forecast` or `actual` column.
+- `station` and `region` remain coarse anonymized labels. The agent is forbidden
+  from inferring a specific airport, city, or route network.
+
+The loader in [`data.py`](data.py) validates columns, nulls, key uniqueness,
+month alignment, horizon positivity, and agreement of each scale's actuals
+across horizons. It registers one actual series per station **and scale** with
+the shared `DataService`. Cache and spec IDs include the scale so the two
+runs cannot overwrite each other.
+
+## Forecasting and leakage controls
+
+[`predictors.py`](predictors.py) adapts the selected-scale external forecast to
+the shared `Predictor`/`Prediction` contract. [`analyst_agent/agent.py`](analyst_agent/agent.py)
+uses the common ADK `AgentPredictor` and Vector-proxy models.
+
+For every historical issue date:
+
+1. the prompt includes only station, region, issue/target dates, horizon,
+   forecast scale, that scale's external forecast, and non-outcome model metadata;
+2. `search_web` is called with the issue date as its cutoff;
+3. the independent verifier rejects post-cutoff claims;
+4. the agent must leave the forecast unchanged when evidence is weak;
+5. non-zero adjustments are capped at ±20%;
+6. the agent must not convert between minmax and indexed values.
+
+Relevant evidence includes capacity or demand changes, cancellations, airspace
+or routing disruption, severe weather, and operationally material policy
+changes. Fuel-price news alone is not treated as a direct change in physical
+consumption.
+
+## Evaluation
+
+Run [`01_agentic_forecast_adjustment.ipynb`](01_agentic_forecast_adjustment.ipynb).
+The default `RUN_AGENT = False` makes “Run All” free: it evaluates both external
+baselines and loads any cached agent artifacts. Set it to `True` deliberately to
+make 36 agent calls per scale plus search/verifier calls.
+
+The primary metrics are:
+
+- **MAE** — average absolute error, in that scale's anonymized units. Do not
+  rank minmax against indexed using MAE.
+- **MAPE** — average absolute percentage error, used to compare stations,
+  horizons, and the two input scales. Zero actuals are rejected because MAPE
+  would be undefined.
+
+If the agent copies the baseline, paired MAE/MAPE *improvement* is exactly 0.
+That is a real outcome, not a missing-actual bug.
+
+The shared harness requires continuous payloads, so both methods store their
+point forecasts as deterministic quantile payloads for artifact compatibility.
+CRPS is therefore not used to rank this point-only comparison.
+
+[`analysis.py`](analysis.py) reports overall, station, region, and horizon
+breakdowns plus paired error improvement and win rate, grouped by forecast
+scale. With only 36 rows per scale, these results are descriptive; reserve
+newer months as a protected window before operational tuning.
+
+## Langfuse (project `air-canada-1`)
+
+Traces are sent to the Langfuse project that issued your API keys. For this
+use case that project is **`air-canada-1`**. Set these in the environment or
+repo `.env` (never commit secrets):
+
+```text
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://us.cloud.langfuse.com
+```
+
+`LANGFUSE_HOST` must match the project's region. The notebook calls
+`connect_langfuse()` and `auth_check()` before agent runs. Agent traces are
+tagged `air-canada-1`, `ac_one`, and `scale_minmax` / `scale_indexed`.
+
+`LANGFUSE_PROJECT_NAME` is a label used for those tags, the score metadata, and
+the notebook's status messages — it does not route anything. The destination
+project is whichever one issued the keys, so the project shown in the Langfuse
+UI can differ from the constant without anything being misconfigured.
+
+[`trace_stamp.py`](trace_stamp.py) writes each adjusted point forecast onto the
+`forecast` observation of its trace. The predictor stamps only after it has
+verified the echoed anchor, so the station, forecast scale, and horizon that
+scoring joins on are already attached rather than living only in the local cache.
+
+With `RUN_TRACE_EVAL = True`, [`trace_eval.py`](trace_eval.py) reads each
+stamped forecast from Langfuse, joins the matching `actual_*` column, and
+pushes deterministic scores (`absolute_error`, `ape_pct`, improvements,
+`adjustment_pct`) back onto the same traces. Set `RUN_RATIONALE_JUDGE = True`
+only when you want extra LLM-as-judge calls for rationale quality.
+
+Traces stamped by earlier runs can carry the station, scale, and horizon empty;
+`task_identity_lookup()` recovers them from the stamped `task_id`, so
+already-recorded traces stay scoreable without re-running the agent.
+`max_wait_s` bounds the per-trace readiness poll — the default suits
+already-ingested traces, and every unresolvable trace ID costs that full
+budget, so raise it only when scoring a run that just finished.
+
+## Core library boundary
+
+Everything this use case adds lives under `implementations/ac_one/`, with its
+tests under `implementations/tests/ac_one/`. The shared `aieng.forecasting`
+library is used as-is — the `Predictor`/`Prediction` contracts, `AgentPredictor`
+and the ADK runner, the Langfuse trace reader and scorer — and anything the
+overlay needs beyond it is implemented here rather than by extending the
+library: [`predictors.py`](predictors.py) adapts the external forecasts to the
+shared contract, and [`trace_stamp.py`](trace_stamp.py) supplies the continuous
+forecast payload that the library's categorical-only
+`stamp_forecast_on_trace()` does not write.
+
+## Layout
+
+```text
+implementations/ac_one/
+├── VECTOR___AGENTIC_FORECASTING_DATA.csv
+├── data.py
+├── specs.py
+├── predictors.py
+├── analysis.py
+├── trace_stamp.py
+├── trace_eval.py
+├── analyst_agent/
+│   ├── agent.py
+│   └── skills/news-adjustment/SKILL.md
+├── specs/ac_one_backtest.yaml
+└── 01_agentic_forecast_adjustment.ipynb
+```
+
+## Extensions
+
+- Add schedule/capacity features or forecast metadata that can reveal whether a
+  news event is already represented by the external model.
+- Calibrate the adjustment cap by station and horizon on a development window.
+- Record prospective forecasts and evaluate them only after each target month
+  resolves.
+- Add a true probabilistic forecast from the external model; only then compare
+  both methods with CRPS and interval calibration.
