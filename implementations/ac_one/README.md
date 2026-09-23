@@ -45,18 +45,50 @@ runs cannot overwrite each other.
 ## Forecasting and leakage controls
 
 [`predictors.py`](predictors.py) adapts the selected-scale external forecast to
-the shared `Predictor`/`Prediction` contract. [`analyst_agent/agent.py`](analyst_agent/agent.py)
-uses the common ADK `AgentPredictor` and Vector-proxy models.
+the shared `Predictor`/`Prediction` contract (Case A, the unadjusted baseline).
+[`analyst_agent/agent.py`](analyst_agent/agent.py) is Case B: the common ADK
+`AgentPredictor` with a toolbelt, running at temperature 0 on Vector-proxy models.
 
 For every historical issue date:
 
 1. the prompt includes only station, region, issue/target dates, horizon,
-   forecast scale, that scale's external forecast, and non-outcome model metadata;
-2. `search_web` is called with the issue date as its cutoff;
+   forecast scale, that scale's external forecast, and non-outcome model metadata
+   (`forecast_input_frame()` drops `actual_*` before anything reaches the builder);
+2. `search_web` is called with the issue date as its cutoff, and the harness
+   seeds the same date into the session so the tool enforces it regardless of
+   what the model passes;
 3. the independent verifier rejects post-cutoff claims;
-4. the agent must leave the forecast unchanged when evidence is weak;
-5. non-zero adjustments are capped at ±20%;
-6. the agent must not convert between minmax and indexed values.
+4. the agent must leave the forecast unchanged when evidence is weak, and with
+   an empty toolbelt it has no evidence at all;
+5. the adjustment is clipped in Python to ±`cap_pct` (default 20%) after the
+   response is parsed — the prompt states the cap, but the code enforces it;
+6. the predictor rejects any response whose echoed baseline differs from the CSV;
+7. the agent must not convert between minmax and indexed values.
+
+### Toolbelt seam
+
+An agent is the fixed analyst instruction plus a list of `ToolSpec`s from
+[`analyst_agent/tools.py`](analyst_agent/tools.py), folded by
+`build_fuel_adjustment_config(forecast_scale=..., tools=...)`:
+
+```python
+from ac_one.analyst_agent import build_fuel_adjustment_config, news_search
+
+config = build_fuel_adjustment_config(forecast_scale="indexed")                  # default: [news_search()]
+config = build_fuel_adjustment_config(forecast_scale="indexed", tools=())        # no-evidence control
+config = build_fuel_adjustment_config(forecast_scale="indexed", tools=[news_search(search_model=...)])
+```
+
+`news_search()` wraps the shared `search_web` sub-agent (proxy Google Search
+plus the post-cutoff verifier) and loads the
+[`news-adjustment`](analyst_agent/skills/news-adjustment/SKILL.md) skill. Search
+behaviour is edited in exactly two places — the search instruction in
+`tools.py` and that skill — never in the evaluation code. Search queries must
+not contain real station names or CSV actuals.
+
+`Prediction.metadata` records `cap_pct`, `tools_enabled`, `raw_adjustment_pct`
+and `cap_applied`, and the Langfuse trace metadata carries `cap_pct` and `tools`
+as ASCII strings, so a result is always attributable to a specific toolbelt.
 
 Relevant evidence includes capacity or demand changes, cancellations, airspace
 or routing disruption, severe weather, and operationally material policy
@@ -65,7 +97,13 @@ consumption.
 
 ## Evaluation
 
-Run [`01_agentic_forecast_adjustment.ipynb`](01_agentic_forecast_adjustment.ipynb).
+[`00_smoke_adjustment.ipynb`](00_smoke_adjustment.ipynb) is the cheap check:
+three indexed rows, `tools=()` then `tools=[news_search()]`, with an offline
+proof that the prompt has no `actual_*` key, the baseline echoes the CSV, and
+the cap clips. The live cells run only when the proxy key is present.
+
+Run [`01_agentic_forecast_adjustment.ipynb`](01_agentic_forecast_adjustment.ipynb)
+for the comparison.
 The default `RUN_AGENT = False` makes “Run All” free: it evaluates both external
 baselines and loads any cached agent artifacts. Set it to `True` deliberately to
 make 36 agent calls per scale plus search/verifier calls.
@@ -153,17 +191,24 @@ implementations/ac_one/
 ├── trace_stamp.py
 ├── trace_eval.py
 ├── analyst_agent/
-│   ├── agent.py
+│   ├── agent.py                 # Case B predictor, config fold, Python cap
+│   ├── tools.py                 # ToolSpec + news_search() (search instruction lives here)
 │   └── skills/news-adjustment/SKILL.md
 ├── specs/ac_one_backtest.yaml
+├── 00_smoke_adjustment.ipynb    # 3-row seam smoke
 └── 01_agentic_forecast_adjustment.ipynb
 ```
+
+`tests/ac_one/` covers the loader, Case A lookup, MAE/MAPE scoring, the trace
+scorer, the toolbelt fold, the Python cap, and prompt leakage.
 
 ## Extensions
 
 - Add schedule/capacity features or forecast metadata that can reveal whether a
   news event is already represented by the external model.
-- Calibrate the adjustment cap by station and horizon on a development window.
+- Calibrate `cap_pct` by station and horizon on a development window.
+- Add a second `ToolSpec` (for example structured price or capacity signals)
+  next to `news_search()`; the fold and the metadata already accommodate it.
 - Record prospective forecasts and evaluate them only after each target month
   resolves.
 - Add a true probabilistic forecast from the external model; only then compare

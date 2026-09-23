@@ -43,6 +43,7 @@ The repository is a foundation. Each reference implementation's README ends with
 - **BoC live forecasting** — extend `meeting_schedule.yaml` with the Bank's published future dates and forecast each announcement the day before it happens: genuinely out-of-sample, and the honest test that backtest leakage precludes. Needs annual calendar maintenance.
 - **Reports as predictor context** — wire cutoff-filtered documents into the forecast prompt: BoC press releases / Monetary Policy Reports through the LLM-Process `user_prompt_suffix` or the `build_boc_news_config` retrieval seam, and the analogous food-CPI CFPR wiring (extraction already exists; mirror BoC's `PressReleaseStore`). Measure the lift over the quantitative-only baseline.
 - **Memory-augmented agent** — an agent that learns from its own resolved prediction errors over time; a generalization of the energy adaptive agent across use cases.
+- **AC One toolbelt** — the fuel-consumption adjustment agent folds `ToolSpec`s from `implementations/ac_one/analyst_agent/tools.py`; today only `news_search()` exists. Next seams: a structured price/capacity signal tool, per-station/horizon calibration of `cap_pct` on a development window, and a prospective (post-cutoff) evaluation once newer months resolve.
 
 ### Agent and analyst depth
 

@@ -24,6 +24,8 @@ implementations/
 |   `-- specs/                #     backtest and eval YAML
 |-- boc_rate_decisions/       # 4 · Discrete-event reference: BoC cut/hold/hike direction
 |   `-- specs/                #     direction + binary backtest / eval / smoke YAML
+|-- ac_one/                   # 5 · External-forecast adjustment: airline fuel consumption
+|   `-- specs/                #     backtest YAML
 |-- tests/                    # tests for implementation-specific helper modules
 `-- pyproject.toml            # local workspace packaging
 ```
