@@ -65,7 +65,7 @@ def _enriched_prediction(row: pd.Series, *, rationale: str) -> Prediction:
         task_id="fuel_consumption_minmax_case",
         issued_at=datetime(2026, 1, 1),
         as_of=pd.Timestamp(row["forecast_origin"]).to_pydatetime(),
-        forecast_date=pd.Timestamp(row["horizon_date"]).to_pydatetime(),
+        forecast_date=pd.Timestamp(row["target_month"]).to_pydatetime(),
         payload=deterministic_payload(float(row["forecast_minmax"])),
         metadata={
             "rationale": rationale,

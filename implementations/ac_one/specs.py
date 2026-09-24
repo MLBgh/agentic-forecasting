@@ -1,10 +1,10 @@
 """Experiment-manifest loading for AC One.
 
-The CSV is a ragged panel when indexed by forecast origin: each target month
-has forecasts issued one, two, and three months earlier.  A single
-``MultiTargetBacktestSpec`` cannot express different origin lists per task, so
-the manifest below compiles to one standard ``BacktestSpec`` per
-station/horizon pair for a chosen forecast scale.
+The CSV is a ragged panel when indexed by forecast origin: each origin has
+forecasts at one, two, and/or three month leads, so target months differ by
+horizon.  A single ``MultiTargetBacktestSpec`` cannot express different origin
+lists per task, so the manifest below compiles to one standard ``BacktestSpec``
+per station/horizon pair for a chosen forecast scale.
 """
 
 from __future__ import annotations
@@ -80,6 +80,8 @@ def build_backtest_specs(
     if missing_horizons:
         raise ValueError(f"Spec references horizons absent from the dataset: {missing_horizons}")
 
+    if "target_month" not in data.columns:
+        raise ValueError("Normalized AC One data is missing target_month; load via load_forecast_data().")
     target_start = pd.Timestamp(experiment.target_start)
     target_end = pd.Timestamp(experiment.target_end)
     specs: dict[str, BacktestSpec] = {}
@@ -89,8 +91,8 @@ def build_backtest_specs(
             selected = data[
                 (data["station"] == station)
                 & (data["month_horizon"] == horizon)
-                & (data["horizon_date"] >= target_start)
-                & (data["horizon_date"] <= target_end)
+                & (data["target_month"] >= target_start)
+                & (data["target_month"] <= target_end)
             ].sort_values("forecast_origin")
             if selected.empty:
                 raise ValueError(

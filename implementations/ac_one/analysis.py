@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from ac_one.data import actual_column, normalize_forecast_scale
 from ac_one.predictors import scale_for_task, station_for_task
@@ -18,7 +17,11 @@ def predictions_to_frame(
     *,
     forecast_scale: str | None = None,
 ) -> pd.DataFrame:
-    """Flatten results and attach matching evaluation-only actuals, MAE, and APE."""
+    """Flatten results and attach matching evaluation-only actuals, MAE, and APE.
+
+    Actuals are joined on station and target month (origin ``horizon_date`` plus
+    ``month_horizon``), not on ``horizon_date`` itself.
+    """
     rows: list[dict[str, Any]] = []
 
     for predictor_name, case_results in results_by_predictor.items():
@@ -27,20 +30,25 @@ def predictions_to_frame(
             scale = forecast_scale or scale_for_task(result.spec.task)
             resolved_scale = normalize_forecast_scale(scale)
             actual_col = actual_column(resolved_scale)
+            lookup_frame = data.assign(_target_month=pd.to_datetime(data["target_month"]).dt.normalize())
             actual_lookup = (
-                data[["station", "region", "horizon_date", actual_col]]
-                .drop_duplicates(["station", "horizon_date"])
-                .set_index(["station", "horizon_date"])
+                lookup_frame[["station", "region", "_target_month", actual_col]]
+                .drop_duplicates(["station", "_target_month"])
+                .set_index(["station", "_target_month"])
             )
             horizon = result.spec.task.horizons[0]
             for prediction in result.predictions:
                 if not isinstance(prediction.payload, ContinuousForecast):
                     raise TypeError("AC One analysis requires continuous point forecasts.")
-                target = pd.Timestamp(prediction.forecast_date)
+                target = pd.Timestamp(prediction.forecast_date).normalize()
                 try:
                     actual_row = actual_lookup.loc[(station, target)]
                 except KeyError as exc:
-                    raise ValueError(f"No actual found for station={station!r}, target={target.date()}.") from exc
+                    raise ValueError(
+                        f"No actual found for station={station!r}, target={target.date()}. "
+                        "Cached predictions may still use origin as forecast_date; "
+                        "re-run the baseline with FORCE_REFRESH = True."
+                    ) from exc
                 actual = float(actual_row[actual_col])
                 if actual == 0:
                     raise ValueError(
@@ -103,15 +111,20 @@ def metric_summary(
     *,
     by: Sequence[str] = (),
 ) -> pd.DataFrame:
-    """Aggregate MAE and MAPE by predictor and optional dimensions."""
+    """Aggregate MAE and MAPE by predictor and optional dimensions.
+
+    Rows are ordered by ``forecast_scale``, then any ``by`` keys (horizon,
+    station, …), then ``predictor``, so the two predictors sit adjacent on
+    each slice instead of MAPE-rank interleaving.
+    """
     required = {"predictor", "absolute_error", "ape_pct"}
     missing = sorted(required - set(scored.columns))
     if missing:
         raise ValueError(f"Scored frame is missing required columns: {missing}")
-    group_columns = ["predictor", *by]
+    group_columns = [*by, "predictor"]
     if "forecast_scale" in scored.columns and "forecast_scale" not in group_columns:
         group_columns = ["forecast_scale", *group_columns]
-    return (
+    summary = (
         scored.groupby(group_columns, dropna=False)
         .agg(
             mae=("absolute_error", "mean"),
@@ -119,11 +132,9 @@ def metric_summary(
             n_forecasts=("absolute_error", "size"),
         )
         .reset_index()
-        .sort_values(
-            ["forecast_scale", "mape_pct", "mae"] if "forecast_scale" in group_columns else ["mape_pct", "mae"]
-        )
-        .reset_index(drop=True)
     )
+    sort_columns = [column for column in ("forecast_scale", *by, "predictor") if column in summary.columns]
+    return summary.sort_values(sort_columns).reset_index(drop=True)
 
 
 def paired_improvement(
@@ -185,40 +196,14 @@ def paired_improvement(
             ]
         )
     summary["win_rate_pct"] = summary.pop("win_rate") * 100.0
+    sort_columns = [column for column in ("forecast_scale", *by) if column in summary.columns]
+    if sort_columns:
+        summary = summary.sort_values(sort_columns).reset_index(drop=True)
     return summary
-
-
-def mean_absolute_error(actual: Sequence[float], forecast: Sequence[float]) -> float:
-    """Compute MAE with explicit shape validation."""
-    actual_array = np.asarray(actual, dtype=float)
-    forecast_array = np.asarray(forecast, dtype=float)
-    if actual_array.shape != forecast_array.shape:
-        raise ValueError("actual and forecast must have the same shape.")
-    if actual_array.size == 0:
-        return float("nan")
-    return float(np.mean(np.abs(forecast_array - actual_array)))
-
-
-def mean_absolute_percentage_error(
-    actual: Sequence[float],
-    forecast: Sequence[float],
-) -> float:
-    """Compute MAPE in percent, rejecting zero actuals."""
-    actual_array = np.asarray(actual, dtype=float)
-    forecast_array = np.asarray(forecast, dtype=float)
-    if actual_array.shape != forecast_array.shape:
-        raise ValueError("actual and forecast must have the same shape.")
-    if actual_array.size == 0:
-        return float("nan")
-    if np.any(actual_array == 0):
-        raise ValueError("MAPE is undefined when any actual value is zero.")
-    return float(np.mean(np.abs(forecast_array - actual_array) / np.abs(actual_array)) * 100.0)
 
 
 __all__ = [
     "improvement_display_formats",
-    "mean_absolute_error",
-    "mean_absolute_percentage_error",
     "metric_display_formats",
     "metric_summary",
     "paired_improvement",

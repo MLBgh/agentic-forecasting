@@ -102,4 +102,5 @@ def test_prompt_payload_has_no_actual_keys_and_carries_the_cap() -> None:
             assert not {k for k in _keys(payload) if "actual" in k and k != "actual_is_unavailable"}
             assert payload["constraints"]["max_absolute_adjustment_pct"] == cap
             assert payload["as_of"] == str(pd.Timestamp(origin).date())
+            assert payload["target_month"] != payload["as_of"]
             assert payload["station"] in {"STATION_A", "STATION_B"}

@@ -48,6 +48,7 @@ def test_external_predictor_reads_the_requested_scale() -> None:
             & (data["month_horizon"] == spec.task.horizons[0])
         ].iloc[0]
         assert predictions[0].payload.point_forecast == float(row[forecast_column(scale)])
+        assert predictions[0].forecast_date == pd.Timestamp(row["target_month"]).to_pydatetime()
         assert predictions[0].metadata["forecast_scale"] == scale
 
 
@@ -79,6 +80,7 @@ def test_agent_prompt_excludes_actuals_and_uses_scale_forecast() -> None:
         spec = next(iter(specs.values()))
         origin = spec.origin_dates[0]
         prompt = FuelForecastPromptBuilder(data, forecast_scale=scale)(task=spec.task, context=service.context(origin))
+        payload = json.loads(prompt)
         assert "actual_minmax" not in prompt
         assert "actual_indexed" not in prompt
         station = station_for_task(spec.task, data)
@@ -88,4 +90,7 @@ def test_agent_prompt_excludes_actuals_and_uses_scale_forecast() -> None:
             & (data["month_horizon"] == spec.task.horizons[0])
         ].iloc[0]
         assert str(float(match[forecast_column(scale)])) in prompt
-        assert f'"forecast_scale": "{scale}"' in prompt
+        assert payload["forecast_scale"] == scale
+        assert payload["as_of"] == str(pd.Timestamp(origin).date())
+        assert payload["target_month"] == str(pd.Timestamp(match["target_month"]).date())
+        assert payload["target_month"] != payload["as_of"]

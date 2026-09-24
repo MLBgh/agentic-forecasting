@@ -38,12 +38,13 @@ def _result_from_csv(scale: str) -> tuple[dict[str, dict[str, BacktestResult]], 
         & (data["month_horizon"] == spec.task.horizons[0])
     ].iloc[0]
     forecast = float(row[forecast_column(scale)])
+    target = pd.Timestamp(row["target_month"])
     prediction = Prediction(
         predictor_id="external_xgboost",
         task_id=spec.task.task_id,
         issued_at=origin,
         as_of=origin,
-        forecast_date=pd.Timestamp(row["horizon_date"]).to_pydatetime(),
+        forecast_date=target.to_pydatetime(),
         payload=deterministic_payload(forecast),
         metadata={"forecast_scale": scale, "station": station, "month_horizon": spec.task.horizons[0]},
     )
@@ -62,6 +63,7 @@ def test_minmax_mae_is_nonzero_and_not_integer_rounded_to_zero() -> None:
     assert scored.loc[0, "absolute_error"] == expected_mae
     summary = metric_summary(scored)
     assert summary.loc[0, "mae"] == expected_mae
+    assert list(summary.columns[:2]) == ["forecast_scale", "predictor"]
     mae_format = metric_display_formats("minmax")["mae"]
     formatted = mae_format.format(summary.loc[0, "mae"])
     assert formatted != "0"
@@ -99,3 +101,8 @@ def test_paired_improvement_is_zero_when_agent_copies_baseline() -> None:
     paired = paired_improvement(scored)
     assert paired.loc[0, "mean_mae_improvement"] == 0.0
     assert paired.loc[0, "mean_mape_improvement_pct_points"] == 0.0
+    summary = metric_summary(scored)
+    assert list(summary["predictor"]) == ["External XGBoost", "News-adjusted agent"]
+    by_horizon = metric_summary(scored, by=["horizon"])
+    assert list(by_horizon.columns[:3]) == ["forecast_scale", "horizon", "predictor"]
+    assert list(by_horizon.sort_values(["forecast_scale", "horizon", "predictor"]).index) == list(by_horizon.index)

@@ -1,7 +1,7 @@
 # AC One full comparison manifest
 #
-# horizon_date is the target month in the anonymized export. Each forecast
-# origin is reconstructed as target month minus month_horizon.
+# horizon_date is the forecast origin. The target month is origin plus
+# month_horizon. target_start / target_end filter that derived target month.
 
 spec_id: ac_one_backtest_2026h1
 
@@ -18,4 +18,4 @@ stations:
 horizons: [1, 2, 3]
 
 target_start: "2026-01-01"
-target_end: "2026-06-01"
+target_end: "2026-07-01"

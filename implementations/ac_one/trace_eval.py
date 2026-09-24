@@ -250,7 +250,10 @@ def trace_ids_from_results(results: dict[str, BacktestResult]) -> list[str]:
 
 def _lookup_actual(data: pd.DataFrame, *, station: str, target: pd.Timestamp, scale: str) -> float:
     column = actual_column(scale)
-    matches = data[(data["station"] == station) & (data["horizon_date"] == target)]
+    matches = data[
+        (data["station"] == station)
+        & (pd.to_datetime(data["target_month"]).dt.normalize() == pd.Timestamp(target).normalize())
+    ]
     if matches.empty:
         raise ValueError(f"No actual for station={station!r}, target={target.date()}, scale={scale}.")
     actual = float(matches.iloc[0][column])
@@ -371,7 +374,8 @@ def evaluate_trace_forecasts(
     """Score stamped AC One forecasts from Langfuse traces.
 
     Deterministic scores (absolute error, APE, baseline improvements, adjustment)
-    are computed against the matching ``actual_*`` column. The LLM judge is
+    are computed against the matching ``actual_*`` column at the target month
+    (origin ``horizon_date`` plus ``month_horizon``). The LLM judge is
     optional and is skipped unless ``run_judge`` is true.
 
     ``max_wait_s`` bounds the per-trace readiness poll. The default suits

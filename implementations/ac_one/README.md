@@ -25,11 +25,13 @@ produces better results. MAE is scale-specific; use MAPE to compare scales.
 ## Data contract
 
 [`VECTOR___AGENTIC_FORECASTING_DATA.csv`](VECTOR___AGENTIC_FORECASTING_DATA.csv)
-contains 36 rows: two anonymized stations, six target months, and three horizons.
+contains 30 rows: two anonymized stations, a ragged origin panel (six / five /
+four origins at 1- / 2- / 3-month leads), and target months derived as origin
+plus lead.
 
-- `horizon_date` is the target month.
+- `horizon_date` is the forecast origin (the month the forecast was issued).
 - `month_horizon` is the lead in months.
-- forecast origin is derived as `horizon_date - month_horizon` months.
+- the target month is `horizon_date` plus `month_horizon` months.
 - `forecast_minmax` / `actual_minmax` are one paired evaluation scale.
 - `forecast_indexed` / `actual_indexed` are the other paired evaluation scale.
 - There is no unsuffixed `forecast` or `actual` column.
@@ -38,7 +40,7 @@ contains 36 rows: two anonymized stations, six target months, and three horizons
 
 The loader in [`data.py`](data.py) validates columns, nulls, key uniqueness,
 month alignment, horizon positivity, and agreement of each scale's actuals
-across horizons. It registers one actual series per station **and scale** with
+across origins that share a **target month**. It registers one actual series per station **and scale** with
 the shared `DataService`. Cache and spec IDs include the scale so the two
 runs cannot overwrite each other.
 
@@ -106,7 +108,7 @@ Run [`01_agentic_forecast_adjustment.ipynb`](01_agentic_forecast_adjustment.ipyn
 for the comparison.
 The default `RUN_AGENT = False` makes “Run All” free: it evaluates both external
 baselines and loads any cached agent artifacts. Set it to `True` deliberately to
-make 36 agent calls per scale plus search/verifier calls.
+make 30 agent calls per scale plus search/verifier calls.
 
 The primary metrics are:
 
@@ -115,6 +117,10 @@ The primary metrics are:
 - **MAPE** — average absolute percentage error, used to compare stations,
   horizons, and the two input scales. Zero actuals are rejected because MAPE
   would be undefined.
+
+[`analysis.py`](analysis.py) and [`trace_eval.py`](trace_eval.py) join each
+prediction to its actual on station and **target month** (`horizon_date` +
+`month_horizon`). `horizon_date` is the origin, not the month being scored.
 
 If the agent copies the baseline, paired MAE/MAPE *improvement* is exactly 0.
 That is a real outcome, not a missing-actual bug.
@@ -125,7 +131,7 @@ CRPS is therefore not used to rank this point-only comparison.
 
 [`analysis.py`](analysis.py) reports overall, station, region, and horizon
 breakdowns plus paired error improvement and win rate, grouped by forecast
-scale. With only 36 rows per scale, these results are descriptive; reserve
+scale. With only 30 rows per scale, these results are descriptive; reserve
 newer months as a protected window before operational tuning.
 
 ## Langfuse (project `air-canada-1`)

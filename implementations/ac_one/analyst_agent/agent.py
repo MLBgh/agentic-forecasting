@@ -257,7 +257,7 @@ class FuelForecastPromptBuilder:
         payload = {
             "task": task.task_id,
             "as_of": str(pd.Timestamp(context.as_of).date()),
-            "target_month": str(pd.Timestamp(row["horizon_date"]).date()),
+            "target_month": str(pd.Timestamp(row["target_month"]).date()),
             "station": station,
             "region": str(row["region"]),
             "month_horizon": horizon,
