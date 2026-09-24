@@ -21,7 +21,41 @@ def test_checked_in_csv_matches_required_schema() -> None:
     assert REQUIRED_COLUMNS.issubset(set(data.columns))
     assert "forecast" not in data.columns
     assert "actual" not in data.columns
-    assert len(data) == 36
+    assert len(data) == 30
+
+
+def test_origin_is_horizon_date_and_target_is_origin_plus_lead() -> None:
+    """CSV horizon_date is the issue month; target_month is origin plus month_horizon."""
+    data = load_forecast_data()
+    assert (data["forecast_origin"] == data["horizon_date"]).all()
+    expected_targets = [
+        pd.Timestamp(origin) + pd.DateOffset(months=int(horizon))
+        for origin, horizon in zip(data["horizon_date"], data["month_horizon"], strict=True)
+    ]
+    assert list(data["target_month"]) == expected_targets
+
+
+def test_actuals_frame_is_indexed_by_target_month() -> None:
+    """Registered actuals use the realized month, not the origin."""
+    data = load_forecast_data()
+    station = str(data["station"].iloc[0])
+    actuals = actuals_frame(data, station, "minmax")
+    expected = (
+        data.loc[data["station"] == station, ["target_month", "actual_minmax"]]
+        .drop_duplicates()
+        .sort_values("target_month")
+        .reset_index(drop=True)
+    )
+    assert list(actuals["timestamp"]) == list(expected["target_month"])
+    assert list(actuals["value"]) == list(expected["actual_minmax"])
+    assert set(actuals["timestamp"]) != set(data.loc[data["station"] == station, "horizon_date"])
+
+
+def test_actuals_agree_across_horizons_for_the_same_target() -> None:
+    """Multiple origins that forecast the same month must share that month's actual."""
+    data = load_forecast_data()
+    counts = data.groupby(["station", "target_month"])["actual_minmax"].nunique()
+    assert (counts == 1).all()
 
 
 def test_scale_column_pairs() -> None:

@@ -10,9 +10,10 @@ Forecasts and actuals are stored as paired scaled columns
 There is no unsuffixed ``forecast`` or ``actual`` column. Each scale is a
 separate experiment input and is scored only against its matching actual.
 
-Forecast origins are reconstructed as ``horizon_date - month_horizon`` months
-because the anonymized export stores the target month rather than an issue
-timestamp.
+``horizon_date`` is the forecast origin (issue month). The target month is
+``horizon_date + month_horizon``. The loader adds ``forecast_origin`` (equal
+to ``horizon_date``) and ``target_month`` so downstream code does not re-derive
+the calendar.
 """
 
 from __future__ import annotations
@@ -57,6 +58,7 @@ PREDICTOR_INPUT_COLUMNS = [
     "schd_file_id",
     "model_version",
     "forecast_origin",
+    "target_month",
 ]
 
 
@@ -86,10 +88,10 @@ def station_series_id(station: str, scale: str) -> str:
 def load_forecast_data(path: Path = DEFAULT_DATA_PATH) -> pd.DataFrame:
     """Load, validate, and enrich the anonymized forecast export.
 
-    Returns a row per station, target month, and horizon with an additional
-    ``forecast_origin`` month-start column. Duplicate keys, inconsistent
-    actuals across horizons, non-positive horizons, and missing values fail
-    loudly rather than silently changing the evaluation sample.
+    Returns a row per station, origin, and horizon with ``forecast_origin``
+    and ``target_month`` month-start columns. Duplicate keys, inconsistent
+    actuals for the same target month, non-positive horizons, and missing
+    values fail loudly rather than silently changing the evaluation sample.
     """
     frame = pd.read_csv(path)
     missing_columns = sorted(REQUIRED_COLUMNS - set(frame.columns))
@@ -125,17 +127,21 @@ def load_forecast_data(path: Path = DEFAULT_DATA_PATH) -> pd.DataFrame:
         duplicate_keys = frame.loc[duplicate_rows, key].to_dict(orient="records")
         raise ValueError(f"AC One dataset contains duplicate forecast keys: {duplicate_keys}")
 
+    frame["forecast_origin"] = frame["horizon_date"]
+    frame["target_month"] = [
+        origin + pd.DateOffset(months=int(horizon))
+        for origin, horizon in zip(frame["horizon_date"], frame["month_horizon"], strict=True)
+    ]
+
     for scale in FORECAST_SCALES:
         column = actual_column(scale)
-        actual_counts = frame.groupby(["station", "horizon_date"])[column].nunique()
+        actual_counts = frame.groupby(["station", "target_month"])[column].nunique()
         inconsistent = actual_counts[actual_counts > 1]
         if not inconsistent.empty:
-            raise ValueError(f"{column} must agree across horizons for each station/month: {list(inconsistent.index)}")
+            raise ValueError(
+                f"{column} must agree across origins/horizons for each station/target month: {list(inconsistent.index)}"
+            )
 
-    frame["forecast_origin"] = [
-        target - pd.DateOffset(months=int(horizon))
-        for target, horizon in zip(frame["horizon_date"], frame["month_horizon"], strict=True)
-    ]
     return frame.sort_values(["station", "forecast_origin", "month_horizon"]).reset_index(drop=True)
 
 
@@ -143,12 +149,14 @@ def actuals_frame(data: pd.DataFrame, station: str, scale: str) -> pd.DataFrame:
     """Return one canonical actual observation per target month for a station/scale."""
     resolved_scale = normalize_forecast_scale(scale)
     column = actual_column(resolved_scale)
-    station_rows = data.loc[data["station"] == station, ["horizon_date", column]]
+    if "target_month" not in data.columns:
+        raise ValueError("Normalized AC One data is missing target_month; load via load_forecast_data().")
+    station_rows = data.loc[data["station"] == station, ["target_month", column]]
     if station_rows.empty:
         raise KeyError(f"Unknown AC One station: {station!r}")
     return (
         station_rows.drop_duplicates()
-        .rename(columns={"horizon_date": "timestamp", column: "value"})
+        .rename(columns={"target_month": "timestamp", column: "value"})
         .assign(released_at=lambda x: x["timestamp"])
         .sort_values("timestamp")
         .reset_index(drop=True)

@@ -68,7 +68,7 @@ def lookup_external_forecast(
         )
     row = matches.iloc[0]
     expected_target = origin_ts + pd.DateOffset(months=horizon)
-    if not isclose((pd.Timestamp(row["horizon_date"]) - expected_target).total_seconds(), 0.0):
+    if not isclose((pd.Timestamp(row["target_month"]) - expected_target).total_seconds(), 0.0):
         raise ValueError("External forecast target date does not match origin + horizon.")
     return row
 
@@ -108,7 +108,7 @@ class ExternalForecastPredictor(Predictor):
             origin=context.as_of,
             horizon=horizon,
         )
-        forecast_date = pd.Timestamp(row["horizon_date"]).to_pydatetime()
+        forecast_date = pd.Timestamp(row["target_month"]).to_pydatetime()
         point = float(row[self._forecast_column])
         return [
             Prediction(

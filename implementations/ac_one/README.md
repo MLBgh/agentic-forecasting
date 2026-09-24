@@ -25,7 +25,9 @@ produces better results. MAE is scale-specific; use MAPE to compare scales.
 ## Data contract
 
 [`VECTOR___AGENTIC_FORECASTING_DATA.csv`](VECTOR___AGENTIC_FORECASTING_DATA.csv)
-contains 36 rows: two anonymized stations, six target months, and three horizons.
+contains 30 rows: two anonymized stations, a ragged origin panel (six / five /
+four origins at 1- / 2- / 3-month leads), and target months derived as origin
+plus lead.
 
 - `horizon_date` is the forecast origin (the month the forecast was issued).
 - `month_horizon` is the lead in months.
@@ -38,7 +40,7 @@ contains 36 rows: two anonymized stations, six target months, and three horizons
 
 The loader in [`data.py`](data.py) validates columns, nulls, key uniqueness,
 month alignment, horizon positivity, and agreement of each scale's actuals
-across horizons. It registers one actual series per station **and scale** with
+across origins that share a **target month**. It registers one actual series per station **and scale** with
 the shared `DataService`. Cache and spec IDs include the scale so the two
 runs cannot overwrite each other.
 
@@ -106,7 +108,7 @@ Run [`01_agentic_forecast_adjustment.ipynb`](01_agentic_forecast_adjustment.ipyn
 for the comparison.
 The default `RUN_AGENT = False` makes “Run All” free: it evaluates both external
 baselines and loads any cached agent artifacts. Set it to `True` deliberately to
-make 36 agent calls per scale plus search/verifier calls.
+make 30 agent calls per scale plus search/verifier calls.
 
 The primary metrics are:
 
@@ -129,7 +131,7 @@ CRPS is therefore not used to rank this point-only comparison.
 
 [`analysis.py`](analysis.py) reports overall, station, region, and horizon
 breakdowns plus paired error improvement and win rate, grouped by forecast
-scale. With only 36 rows per scale, these results are descriptive; reserve
+scale. With only 30 rows per scale, these results are descriptive; reserve
 newer months as a protected window before operational tuning.
 
 ## Langfuse (project `air-canada-1`)
