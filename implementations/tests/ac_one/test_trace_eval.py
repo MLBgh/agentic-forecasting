@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-from ac_one.analysis import row_target_months
 from ac_one.data import load_forecast_data
 from ac_one.specs import case_id
 from ac_one.trace_eval import RationaleQualityVerdict, evaluate_trace_forecasts
@@ -43,7 +42,7 @@ def test_evaluate_trace_forecasts_pushes_deterministic_and_judge_scores() -> Non
     data = load_forecast_data()
     row = data.iloc[0]
     scale = "minmax"
-    target = pd.Timestamp(row_target_months(data).iloc[0])
+    target = pd.Timestamp(row["target_month"])
     forecast = {
         "payload_type": "continuous",
         "predictor_id": "agent",
@@ -102,7 +101,7 @@ def test_identity_is_recovered_from_task_id_when_the_stamp_omits_it() -> None:
     row = data.iloc[0]
     station = str(row["station"])
     horizon = int(row["month_horizon"])
-    target = pd.Timestamp(row_target_months(data).iloc[0])
+    target = pd.Timestamp(row["target_month"])
     forecast = {
         "payload_type": "continuous",
         "predictor_id": "agent",

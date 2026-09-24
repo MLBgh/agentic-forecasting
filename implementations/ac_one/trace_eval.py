@@ -13,7 +13,6 @@ from typing import Any, Callable, Sequence
 
 import pandas as pd
 from ac_one.analyst_agent.agent import LANGFUSE_PROJECT_NAME
-from ac_one.analysis import row_target_months
 from ac_one.data import FORECAST_SCALES, actual_column, normalize_forecast_scale
 from ac_one.specs import case_id
 from aieng.forecasting.evaluation.backtest import BacktestResult
@@ -251,7 +250,10 @@ def trace_ids_from_results(results: dict[str, BacktestResult]) -> list[str]:
 
 def _lookup_actual(data: pd.DataFrame, *, station: str, target: pd.Timestamp, scale: str) -> float:
     column = actual_column(scale)
-    matches = data[(data["station"] == station) & (row_target_months(data) == pd.Timestamp(target))]
+    matches = data[
+        (data["station"] == station)
+        & (pd.to_datetime(data["target_month"]).dt.normalize() == pd.Timestamp(target).normalize())
+    ]
     if matches.empty:
         raise ValueError(f"No actual for station={station!r}, target={target.date()}, scale={scale}.")
     actual = float(matches.iloc[0][column])
