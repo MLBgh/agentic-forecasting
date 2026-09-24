@@ -10,10 +10,11 @@ Forecasts and actuals are stored as paired scaled columns
 There is no unsuffixed ``forecast`` or ``actual`` column. Each scale is a
 separate experiment input and is scored only against its matching actual.
 
-``horizon_date`` is the forecast origin (issue month). The target month is
-``horizon_date + month_horizon``. The loader adds ``forecast_origin`` (equal
-to ``horizon_date``) and ``target_month`` so downstream code does not re-derive
-the calendar.
+``horizon_date`` is the month the forecasting run happened, so it *is* the
+forecast origin. Every row sharing a ``horizon_date`` also shares one
+``model_version`` and one ``schd_file_id``, because a single run emits all
+leads at once. The month a row forecasts is therefore derived rather than
+stored -- see :func:`target_month_for`.
 """
 
 from __future__ import annotations
@@ -27,6 +28,13 @@ from aieng.forecasting.data.features import StaticFrameAdapter
 
 
 DEFAULT_DATA_PATH = Path(__file__).with_name("VECTOR___AGENTIC_FORECASTING_DATA.csv")
+
+#: Months between a reference month and the earliest date its realised
+#: consumption could be known. A month's total is not complete until the month
+#: ends, so a run at the start of month ``M`` knows actuals only through
+#: ``M - 1``. One month is the earliest defensible lag; raise it if the real
+#: reporting lag is longer.
+ACTUALS_RELEASE_LAG_MONTHS = 1
 
 ForecastScale = Literal["minmax", "indexed"]
 FORECAST_SCALES: tuple[ForecastScale, ...] = ("minmax", "indexed")
@@ -62,6 +70,16 @@ PREDICTOR_INPUT_COLUMNS = [
 ]
 
 
+def target_month_for(origin: object, month_horizon: int) -> pd.Timestamp:
+    """Return the month a run at ``origin`` forecasts at ``month_horizon``.
+
+    A lead of 2 issued in January targets March. This matches the harness
+    convention that horizon ``h`` means ``h`` frequency units past the origin,
+    so ``as_of + offset * h`` stays equivalent.
+    """
+    return pd.Timestamp(origin) + pd.DateOffset(months=int(month_horizon))
+
+
 def normalize_forecast_scale(scale: str) -> ForecastScale:
     """Return a validated forecast-scale identifier."""
     if scale not in FORECAST_SCALES:
@@ -88,10 +106,11 @@ def station_series_id(station: str, scale: str) -> str:
 def load_forecast_data(path: Path = DEFAULT_DATA_PATH) -> pd.DataFrame:
     """Load, validate, and enrich the anonymized forecast export.
 
-    Returns a row per station, origin, and horizon with ``forecast_origin``
-    and ``target_month`` month-start columns. Duplicate keys, inconsistent
-    actuals for the same target month, non-positive horizons, and missing
-    values fail loudly rather than silently changing the evaluation sample.
+    Returns a row per station, run month, and lead, with ``forecast_origin``
+    (the run month) and ``target_month`` (the month being forecast) as added
+    month-start columns. Duplicate keys, actuals that disagree for the same
+    target month, non-positive horizons, and missing values fail loudly rather
+    than silently changing the evaluation sample.
     """
     frame = pd.read_csv(path)
     missing_columns = sorted(REQUIRED_COLUMNS - set(frame.columns))
@@ -129,38 +148,59 @@ def load_forecast_data(path: Path = DEFAULT_DATA_PATH) -> pd.DataFrame:
 
     frame["forecast_origin"] = frame["horizon_date"]
     frame["target_month"] = [
-        origin + pd.DateOffset(months=int(horizon))
+        target_month_for(origin, horizon)
         for origin, horizon in zip(frame["horizon_date"], frame["month_horizon"], strict=True)
     ]
 
+    # The same target month is forecast by several runs at different leads.
+    # Those rows must carry one realised value, or the evaluation sample
+    # depends on which row a join happens to pick.
     for scale in FORECAST_SCALES:
         column = actual_column(scale)
         actual_counts = frame.groupby(["station", "target_month"])[column].nunique()
         inconsistent = actual_counts[actual_counts > 1]
         if not inconsistent.empty:
             raise ValueError(
-                f"{column} must agree across origins/horizons for each station/target month: {list(inconsistent.index)}"
+                f"{column} must agree across every row sharing a station and target month: "
+                f"{[(station, str(month.date())) for station, month in inconsistent.index]}"
             )
 
     return frame.sort_values(["station", "forecast_origin", "month_horizon"]).reset_index(drop=True)
 
 
-def actuals_frame(data: pd.DataFrame, station: str, scale: str) -> pd.DataFrame:
-    """Return one canonical actual observation per target month for a station/scale."""
+def actuals_frame(
+    data: pd.DataFrame,
+    station: str,
+    scale: str,
+    *,
+    release_lag_months: int = ACTUALS_RELEASE_LAG_MONTHS,
+) -> pd.DataFrame:
+    """Return one canonical actual observation per target month for a station/scale.
+
+    ``released_at`` is stamped ``release_lag_months`` after the reference month.
+    Without it the cutoff fence would hand a run at the start of month ``M`` the
+    actual for ``M`` itself, which cannot be known until the month has ended.
+    """
     resolved_scale = normalize_forecast_scale(scale)
     column = actual_column(resolved_scale)
     if "target_month" not in data.columns:
-        raise ValueError("Normalized AC One data is missing target_month; load via load_forecast_data().")
+        raise ValueError("Normalized AC One data is missing the derived 'target_month' column.")
     station_rows = data.loc[data["station"] == station, ["target_month", column]]
     if station_rows.empty:
         raise KeyError(f"Unknown AC One station: {station!r}")
-    return (
+
+    frame = (
         station_rows.drop_duplicates()
         .rename(columns={"target_month": "timestamp", column: "value"})
-        .assign(released_at=lambda x: x["timestamp"])
         .sort_values("timestamp")
         .reset_index(drop=True)
     )
+    if frame["timestamp"].duplicated().any():
+        duplicated = sorted({str(ts.date()) for ts in frame.loc[frame["timestamp"].duplicated(), "timestamp"]})
+        raise ValueError(f"Conflicting {column} values for station {station!r} at target months: {duplicated}")
+
+    frame["released_at"] = frame["timestamp"] + pd.DateOffset(months=release_lag_months)
+    return frame
 
 
 def forecast_input_frame(data: pd.DataFrame) -> pd.DataFrame:
@@ -171,8 +211,12 @@ def forecast_input_frame(data: pd.DataFrame) -> pd.DataFrame:
     return data[PREDICTOR_INPUT_COLUMNS].copy()
 
 
-def build_ac_one_service(data: pd.DataFrame | None = None) -> DataService:
-    """Register one evaluation-only actual series per anonymized station and scale."""
+def build_ac_one_service(
+    data: pd.DataFrame | None = None,
+    *,
+    release_lag_months: int = ACTUALS_RELEASE_LAG_MONTHS,
+) -> DataService:
+    """Register one actual series per anonymized station and scale, keyed by target month."""
     loaded = load_forecast_data() if data is None else data.copy()
     service = DataService()
     for station in sorted(loaded["station"].unique()):
@@ -180,7 +224,7 @@ def build_ac_one_service(data: pd.DataFrame | None = None) -> DataService:
             series_id = station_series_id(str(station), scale)
             service.register(
                 series_id,
-                StaticFrameAdapter(actuals_frame(loaded, str(station), scale)),
+                StaticFrameAdapter(actuals_frame(loaded, str(station), scale, release_lag_months=release_lag_months)),
                 SeriesMetadata(
                     series_id=series_id,
                     description=(f"Monthly airline fuel consumption at {station} ({scale} scale, anonymized)"),
@@ -194,6 +238,7 @@ def build_ac_one_service(data: pd.DataFrame | None = None) -> DataService:
 
 
 __all__ = [
+    "ACTUALS_RELEASE_LAG_MONTHS",
     "DEFAULT_DATA_PATH",
     "FORECAST_SCALES",
     "PREDICTOR_INPUT_COLUMNS",
@@ -208,4 +253,5 @@ __all__ = [
     "load_forecast_data",
     "normalize_forecast_scale",
     "station_series_id",
+    "target_month_for",
 ]

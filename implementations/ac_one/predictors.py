@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from math import isclose
 
 import pandas as pd
 from ac_one.data import (
@@ -13,6 +12,7 @@ from ac_one.data import (
     forecast_input_frame,
     normalize_forecast_scale,
     station_series_id,
+    target_month_for,
 )
 from aieng.forecasting.data.context import ForecastContext
 from aieng.forecasting.evaluation import (
@@ -67,9 +67,13 @@ def lookup_external_forecast(
             f"station={station!r}, origin={origin_ts.date()}, horizon={horizon}; found {len(matches)}."
         )
     row = matches.iloc[0]
-    expected_target = origin_ts + pd.DateOffset(months=horizon)
-    if not isclose((pd.Timestamp(row["target_month"]) - expected_target).total_seconds(), 0.0):
-        raise ValueError("External forecast target date does not match origin + horizon.")
+    expected_target = target_month_for(origin_ts, horizon)
+    actual_target = pd.Timestamp(row["target_month"])
+    if actual_target != expected_target:
+        raise ValueError(
+            f"External forecast target month {actual_target.date()} does not match the month implied by "
+            f"origin {origin_ts.date()} at horizon {horizon} ({expected_target.date()})."
+        )
     return row
 
 
@@ -124,6 +128,7 @@ class ExternalForecastPredictor(Predictor):
                     "station": station,
                     "region": str(row["region"]),
                     "month_horizon": horizon,
+                    "target_month": str(forecast_date.date()),
                     "external_forecast": point,
                     "schedule_file_id": str(row["schd_file_id"]),
                     "model_version": str(row["model_version"]),

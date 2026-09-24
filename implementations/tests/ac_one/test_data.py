@@ -12,6 +12,7 @@ from ac_one.data import (
     forecast_column,
     load_forecast_data,
     station_series_id,
+    target_month_for,
 )
 
 
@@ -24,38 +25,25 @@ def test_checked_in_csv_matches_required_schema() -> None:
     assert len(data) == 30
 
 
-def test_origin_is_horizon_date_and_target_is_origin_plus_lead() -> None:
-    """CSV horizon_date is the issue month; target_month is origin plus month_horizon."""
+def test_target_month_is_the_run_month_plus_the_lead() -> None:
+    """A lead of 2 issued in January targets March; horizon_date is the origin."""
+    origin = pd.Timestamp("2026-01-01")
+    assert target_month_for(origin, 1) == pd.Timestamp("2026-02-01")
+    assert target_month_for(origin, 2) == pd.Timestamp("2026-03-01")
     data = load_forecast_data()
     assert (data["forecast_origin"] == data["horizon_date"]).all()
-    expected_targets = [
-        pd.Timestamp(origin) + pd.DateOffset(months=int(horizon))
-        for origin, horizon in zip(data["horizon_date"], data["month_horizon"], strict=True)
-    ]
-    assert list(data["target_month"]) == expected_targets
 
 
-def test_actuals_frame_is_indexed_by_target_month() -> None:
-    """Registered actuals use the realized month, not the origin."""
+def test_actuals_are_not_visible_until_the_month_has_ended() -> None:
+    """A run at the start of month M knows actuals only through M - 1."""
     data = load_forecast_data()
-    station = str(data["station"].iloc[0])
-    actuals = actuals_frame(data, station, "minmax")
-    expected = (
-        data.loc[data["station"] == station, ["target_month", "actual_minmax"]]
-        .drop_duplicates()
-        .sort_values("target_month")
-        .reset_index(drop=True)
-    )
-    assert list(actuals["timestamp"]) == list(expected["target_month"])
-    assert list(actuals["value"]) == list(expected["actual_minmax"])
-    assert set(actuals["timestamp"]) != set(data.loc[data["station"] == station, "horizon_date"])
-
-
-def test_actuals_agree_across_horizons_for_the_same_target() -> None:
-    """Multiple origins that forecast the same month must share that month's actual."""
-    data = load_forecast_data()
-    counts = data.groupby(["station", "target_month"])["actual_minmax"].nunique()
-    assert (counts == 1).all()
+    service = build_ac_one_service(data)
+    for row in data.itertuples():
+        origin = pd.Timestamp(row.forecast_origin)
+        context = service.context(origin.to_pydatetime())
+        for scale in FORECAST_SCALES:
+            visible = context.get_series(station_series_id(str(row.station), scale))
+            assert (visible["timestamp"] < origin).all()
 
 
 def test_scale_column_pairs() -> None:

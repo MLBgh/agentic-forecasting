@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 from ac_one.analyst_agent.agent import FuelForecastPromptBuilder
-from ac_one.data import build_ac_one_service, forecast_column, load_forecast_data
+from ac_one.data import build_ac_one_service, forecast_column, load_forecast_data, target_month_for
 from ac_one.predictors import ExternalForecastPredictor, station_for_task
 from ac_one.specs import build_backtest_specs, case_spec_id, load_experiment_spec
 
@@ -52,6 +50,24 @@ def test_external_predictor_reads_the_requested_scale() -> None:
         assert predictions[0].payload.point_forecast == float(row[forecast_column(scale)])
         assert predictions[0].forecast_date == pd.Timestamp(row["target_month"]).to_pydatetime()
         assert predictions[0].metadata["forecast_scale"] == scale
+
+
+def test_forecast_date_is_the_target_month_at_every_lead() -> None:
+    """Every lead must resolve to origin + (lead - 1), not to the run month or origin + lead."""
+    data = load_forecast_data()
+    experiment = load_experiment_spec()
+    service = build_ac_one_service(data)
+    predictor = ExternalForecastPredictor(data, forecast_scale="minmax")
+    leads_exercised = set()
+    for spec in build_backtest_specs(experiment, data, forecast_scale="minmax").values():
+        horizon = spec.task.horizons[0]
+        leads_exercised.add(horizon)
+        for origin in spec.origin_dates:
+            prediction = predictor.predict(spec.task, service.context(origin))[0]
+            assert pd.Timestamp(prediction.forecast_date) == target_month_for(origin, horizon)
+    # Guards against the suite silently collapsing to the lead where the run
+    # month and the target month coincide.
+    assert leads_exercised == {1, 2, 3}
 
 
 def test_agent_prompt_excludes_actuals_and_uses_scale_forecast() -> None:
