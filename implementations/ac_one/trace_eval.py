@@ -13,6 +13,7 @@ from typing import Any, Callable, Sequence
 
 import pandas as pd
 from ac_one.analyst_agent.agent import LANGFUSE_PROJECT_NAME
+from ac_one.analysis import row_target_months
 from ac_one.data import FORECAST_SCALES, actual_column, normalize_forecast_scale
 from ac_one.specs import case_id
 from aieng.forecasting.evaluation.backtest import BacktestResult
@@ -250,7 +251,7 @@ def trace_ids_from_results(results: dict[str, BacktestResult]) -> list[str]:
 
 def _lookup_actual(data: pd.DataFrame, *, station: str, target: pd.Timestamp, scale: str) -> float:
     column = actual_column(scale)
-    matches = data[(data["station"] == station) & (data["horizon_date"] == target)]
+    matches = data[(data["station"] == station) & (row_target_months(data) == pd.Timestamp(target))]
     if matches.empty:
         raise ValueError(f"No actual for station={station!r}, target={target.date()}, scale={scale}.")
     actual = float(matches.iloc[0][column])
@@ -371,7 +372,8 @@ def evaluate_trace_forecasts(
     """Score stamped AC One forecasts from Langfuse traces.
 
     Deterministic scores (absolute error, APE, baseline improvements, adjustment)
-    are computed against the matching ``actual_*`` column. The LLM judge is
+    are computed against the matching ``actual_*`` column at the target month
+    (origin ``horizon_date`` plus ``month_horizon``). The LLM judge is
     optional and is skipped unless ``run_judge`` is true.
 
     ``max_wait_s`` bounds the per-trace readiness poll. The default suits

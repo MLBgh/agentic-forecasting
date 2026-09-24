@@ -27,9 +27,9 @@ produces better results. MAE is scale-specific; use MAPE to compare scales.
 [`VECTOR___AGENTIC_FORECASTING_DATA.csv`](VECTOR___AGENTIC_FORECASTING_DATA.csv)
 contains 36 rows: two anonymized stations, six target months, and three horizons.
 
-- `horizon_date` is the target month.
+- `horizon_date` is the forecast origin (the month the forecast was issued).
 - `month_horizon` is the lead in months.
-- forecast origin is derived as `horizon_date - month_horizon` months.
+- the target month is `horizon_date` plus `month_horizon` months.
 - `forecast_minmax` / `actual_minmax` are one paired evaluation scale.
 - `forecast_indexed` / `actual_indexed` are the other paired evaluation scale.
 - There is no unsuffixed `forecast` or `actual` column.
@@ -77,6 +77,10 @@ The primary metrics are:
 - **MAPE** — average absolute percentage error, used to compare stations,
   horizons, and the two input scales. Zero actuals are rejected because MAPE
   would be undefined.
+
+[`analysis.py`](analysis.py) and [`trace_eval.py`](trace_eval.py) join each
+prediction to its actual on station and **target month** (`horizon_date` +
+`month_horizon`). `horizon_date` is the origin, not the month being scored.
 
 If the agent copies the baseline, paired MAE/MAPE *improvement* is exactly 0.
 That is a real outcome, not a missing-actual bug.

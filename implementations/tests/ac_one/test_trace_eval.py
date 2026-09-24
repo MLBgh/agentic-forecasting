@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+from ac_one.analysis import row_target_months
 from ac_one.data import load_forecast_data
 from ac_one.specs import case_id
 from ac_one.trace_eval import RationaleQualityVerdict, evaluate_trace_forecasts
@@ -42,11 +43,12 @@ def test_evaluate_trace_forecasts_pushes_deterministic_and_judge_scores() -> Non
     data = load_forecast_data()
     row = data.iloc[0]
     scale = "minmax"
+    target = pd.Timestamp(row_target_months(data).iloc[0])
     forecast = {
         "payload_type": "continuous",
         "predictor_id": "agent",
-        "forecast_date": pd.Timestamp(row["horizon_date"]).isoformat(),
-        "as_of": pd.Timestamp(row["forecast_origin"]).isoformat(),
+        "forecast_date": target.isoformat(),
+        "as_of": pd.Timestamp(row["horizon_date"]).isoformat(),
         "station": str(row["station"]),
         "forecast_scale": scale,
         "month_horizon": int(row["month_horizon"]),
@@ -100,12 +102,13 @@ def test_identity_is_recovered_from_task_id_when_the_stamp_omits_it() -> None:
     row = data.iloc[0]
     station = str(row["station"])
     horizon = int(row["month_horizon"])
+    target = pd.Timestamp(row_target_months(data).iloc[0])
     forecast = {
         "payload_type": "continuous",
         "predictor_id": "agent",
         "task_id": f"fuel_consumption_minmax_{case_id(station, horizon)}",
-        "forecast_date": pd.Timestamp(row["horizon_date"]).isoformat(),
-        "as_of": pd.Timestamp(row["forecast_origin"]).isoformat(),
+        "forecast_date": target.isoformat(),
+        "as_of": pd.Timestamp(row["horizon_date"]).isoformat(),
         "station": "",
         "forecast_scale": "",
         "month_horizon": None,

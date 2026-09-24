@@ -12,13 +12,35 @@ from ac_one.predictors import scale_for_task, station_for_task
 from aieng.forecasting.evaluation import BacktestResult, ContinuousForecast
 
 
+def row_target_months(data: pd.DataFrame) -> pd.Series:
+    """Return the target month for each forecast row.
+
+    ``horizon_date`` is the forecast origin. The realized month is origin plus
+    ``month_horizon``, unless the frame already carries ``target_month``.
+    """
+    if "target_month" in data.columns:
+        return pd.to_datetime(data["target_month"])
+    origins = pd.to_datetime(data["horizon_date"])
+    return pd.Series(
+        [
+            origin + pd.DateOffset(months=int(horizon))
+            for origin, horizon in zip(origins, data["month_horizon"], strict=True)
+        ],
+        index=data.index,
+    )
+
+
 def predictions_to_frame(
     results_by_predictor: dict[str, dict[str, BacktestResult]],
     data: pd.DataFrame,
     *,
     forecast_scale: str | None = None,
 ) -> pd.DataFrame:
-    """Flatten results and attach matching evaluation-only actuals, MAE, and APE."""
+    """Flatten results and attach matching evaluation-only actuals, MAE, and APE.
+
+    Actuals are joined on station and target month (origin ``horizon_date`` plus
+    ``month_horizon``), not on ``horizon_date`` itself.
+    """
     rows: list[dict[str, Any]] = []
 
     for predictor_name, case_results in results_by_predictor.items():
@@ -27,10 +49,11 @@ def predictions_to_frame(
             scale = forecast_scale or scale_for_task(result.spec.task)
             resolved_scale = normalize_forecast_scale(scale)
             actual_col = actual_column(resolved_scale)
+            lookup_frame = data.assign(_target_month=row_target_months(data))
             actual_lookup = (
-                data[["station", "region", "horizon_date", actual_col]]
-                .drop_duplicates(["station", "horizon_date"])
-                .set_index(["station", "horizon_date"])
+                lookup_frame[["station", "region", "_target_month", actual_col]]
+                .drop_duplicates(["station", "_target_month"])
+                .set_index(["station", "_target_month"])
             )
             horizon = result.spec.task.horizons[0]
             for prediction in result.predictions:
@@ -223,4 +246,5 @@ __all__ = [
     "metric_summary",
     "paired_improvement",
     "predictions_to_frame",
+    "row_target_months",
 ]

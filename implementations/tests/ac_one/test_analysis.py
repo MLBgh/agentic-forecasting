@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
-from ac_one.analysis import metric_display_formats, metric_summary, paired_improvement, predictions_to_frame
+from ac_one.analysis import metric_display_formats, metric_summary, paired_improvement, predictions_to_frame, row_target_months
 from ac_one.data import actual_column, forecast_column, load_forecast_data
 from ac_one.predictors import deterministic_payload, station_series_id
 from ac_one.specs import build_backtest_specs, load_experiment_spec
@@ -38,12 +38,13 @@ def _result_from_csv(scale: str) -> tuple[dict[str, dict[str, BacktestResult]], 
         & (data["month_horizon"] == spec.task.horizons[0])
     ].iloc[0]
     forecast = float(row[forecast_column(scale)])
+    target = pd.Timestamp(row_target_months(data).loc[row.name])
     prediction = Prediction(
         predictor_id="external_xgboost",
         task_id=spec.task.task_id,
         issued_at=origin,
         as_of=origin,
-        forecast_date=pd.Timestamp(row["horizon_date"]).to_pydatetime(),
+        forecast_date=target.to_pydatetime(),
         payload=deterministic_payload(forecast),
         metadata={"forecast_scale": scale, "station": station, "month_horizon": spec.task.horizons[0]},
     )
