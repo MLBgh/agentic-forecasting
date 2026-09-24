@@ -12,6 +12,7 @@ from ac_one.data import (
     forecast_column,
     load_forecast_data,
     station_series_id,
+    target_month_for,
 )
 
 
@@ -21,7 +22,28 @@ def test_checked_in_csv_matches_required_schema() -> None:
     assert REQUIRED_COLUMNS.issubset(set(data.columns))
     assert "forecast" not in data.columns
     assert "actual" not in data.columns
-    assert len(data) == 36
+    assert len(data) == 30
+
+
+def test_target_month_is_the_run_month_plus_the_lead() -> None:
+    """A lead of 2 issued in January targets March; horizon_date is the origin."""
+    origin = pd.Timestamp("2026-01-01")
+    assert target_month_for(origin, 1) == pd.Timestamp("2026-02-01")
+    assert target_month_for(origin, 2) == pd.Timestamp("2026-03-01")
+    data = load_forecast_data()
+    assert (data["forecast_origin"] == data["horizon_date"]).all()
+
+
+def test_actuals_are_not_visible_until_the_month_has_ended() -> None:
+    """A run at the start of month M knows actuals only through M - 1."""
+    data = load_forecast_data()
+    service = build_ac_one_service(data)
+    for row in data.itertuples():
+        origin = pd.Timestamp(row.forecast_origin)
+        context = service.context(origin.to_pydatetime())
+        for scale in FORECAST_SCALES:
+            visible = context.get_series(station_series_id(str(row.station), scale))
+            assert (visible["timestamp"] < origin).all()
 
 
 def test_scale_column_pairs() -> None:
